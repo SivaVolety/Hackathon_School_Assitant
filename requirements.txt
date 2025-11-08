@@ -1,0 +1,7 @@
+fastmcp
+uvicorn
+fastapi
+langchain-community
+langchain==0.3.27
+langchain-ollama
+requests
