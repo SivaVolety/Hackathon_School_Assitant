@@ -171,6 +171,12 @@ if "messages" not in st.session_state:
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
 
+if "waiting_for_reason" not in st.session_state:
+    st.session_state.waiting_for_reason = False
+
+if "absence_date" not in st.session_state:
+    st.session_state.absence_date = None
+
 # -------------------- Helper Functions --------------------
 def parse_absence_date(text: str) -> date:
     """Parse date from natural language text."""
@@ -197,19 +203,8 @@ def parse_absence_date(text: str) -> date:
     return date.today()
 
 
-def report_absence(text: str) -> str:
-    """Report absence via API."""
-    absence_date = parse_absence_date(text)
-    
-    # Extract reason if provided
-    reason = "Not feeling well"
-    if "sick" in text.lower():
-        reason = "Feeling sick"
-    elif "appointment" in text.lower():
-        reason = "Medical appointment"
-    elif "family" in text.lower():
-        reason = "Family emergency"
-    
+def report_absence(absence_date: date, reason: str) -> str:
+    """Report absence via API with the provided date and reason."""
     try:
         response = httpx.post(
             f"{API_BASE_URL}/tools/report_absence",
@@ -227,6 +222,16 @@ def report_absence(text: str) -> str:
         return "❌ Cannot connect to server. Please make sure `python mcp_server.py` is running!"
     except Exception as e:
         return f"❌ Error: {str(e)}"
+
+
+def start_absence_report(text: str) -> str:
+    """Start the absence reporting process by asking for reason."""
+    absence_date = parse_absence_date(text)
+    st.session_state.absence_date = absence_date
+    st.session_state.waiting_for_reason = True
+    
+    date_str = absence_date.strftime('%B %d, %Y')
+    return f"📅 I'll help you report an absence for **{date_str}**.\n\nPlease tell me the reason for your absence:"
 
 
 def get_lunch_menu() -> str:
@@ -254,13 +259,25 @@ def process_user_input(user_input: str) -> str:
     user_input_lower = user_input.lower()
     
     try:
+        # If waiting for absence reason, process it
+        if st.session_state.waiting_for_reason:
+            reason = user_input.strip()
+            absence_date = st.session_state.absence_date
+            
+            # Reset state
+            st.session_state.waiting_for_reason = False
+            st.session_state.absence_date = None
+            
+            # Report the absence with the provided reason
+            return report_absence(absence_date, reason)
+        
         # Check for lunch menu request
         if any(word in user_input_lower for word in ["lunch", "menu", "food", "eat"]):
             return get_lunch_menu()
         
-        # Check for absence report
+        # Check for absence report - start the conversation flow
         elif any(word in user_input_lower for word in ["absent", "absence", "miss school", "won't be there"]):
-            return report_absence(user_input)
+            return start_absence_report(user_input)
         
         # Check for homework or general questions
         elif any(word in user_input_lower for word in ["homework", "schedule", "class"]):
@@ -271,6 +288,9 @@ def process_user_input(user_input: str) -> str:
             return "💬 **Coming Soon!** General chat functionality is currently under development. For now, I can help you report absences or check the lunch menu!"
             
     except Exception as e:
+        # Reset state on error
+        st.session_state.waiting_for_reason = False
+        st.session_state.absence_date = None
         return f"❌ Oops! Something went wrong: {str(e)}"
 
 
@@ -337,7 +357,7 @@ with st.sidebar:
         st.session_state.messages.append(
             {"role": "user", "content": "I will be absent tomorrow"}
         )
-        bot_reply = report_absence("I will be absent tomorrow")
+        bot_reply = start_absence_report("I will be absent tomorrow")
         st.session_state.messages.append(
             {"role": "assistant", "content": bot_reply}
         )
@@ -359,6 +379,8 @@ with st.sidebar:
         st.session_state.messages = [
             {"role": "assistant", "content": "Chat cleared! How can I help you?"}
         ]
+        st.session_state.waiting_for_reason = False
+        st.session_state.absence_date = None
         st.rerun()
     
     st.divider()
